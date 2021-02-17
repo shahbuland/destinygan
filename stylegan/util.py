@@ -5,18 +5,22 @@ import numpy as np
 
 from constants import *
 
+# ==== MODEL SPECIFIC ====
+
 # Freezing and unfreezing weights in model
-def freeze_model(model):
+def freezeModel(model):
     for p in model.parameters():
         p.requires_grad = False
 
-def unfreeze_model(model):
+def unfreezeModel(model):
     for p in model.paramters():
         p.requires_grad = True
 
 # Flatten a tensor, accounting for batch axis
 def flatten(t):
     return t.reshape(t.shape[0], -1)
+
+# ==== IMAGE PROCESSING ====
 
 # Convert a batch of PIL images into a tensor
 def imageToTensor(img):
@@ -26,6 +30,12 @@ def imageToTensor(img):
     if USE_HALF: t = t.half()
     t = F.interpolate(t, (IMG_SIZE, IMG_SIZE))
     return t
+
+from torchvision import transforms
+# Same as above but for torchvision transform
+imageToTensorTransform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace = True])
 
 # Convert a single CV image into a tensor
 def imageToTensorCV(img):
@@ -43,3 +53,12 @@ def tensorToCV(t):
     t = (255 * t.squeeze()).type(torch.ByteTensor).numpy()
     t = cv2.cvtColor(t, cv2.COLOR_RGB2BGR)
     return t
+
+# ==== TRAINING ====
+
+# Returns 2 noise vectors with prob MIX_PROB
+# 1 otherwise (latent vectors)
+def getMixingLatent(size):
+    if np.random.random() < MIX_PROB:
+        return torch.randn(size, LATENT_DIM, 2)
+    return torch.randn(size, LATENT_DIM, 1)
