@@ -39,7 +39,8 @@ class AugmentLayer(nn.Module):
         self.d_outs = torch.Tensor([0])
         self.num_outs = 0
 
-    def forward(self, x, prob = self.aug_prob):
+    def forward(self, x, prob = None):
+        if prob is None: prob = self.aug_prob
         for augment in self.geometric:
             if randomPass(prob):
                 x = augment(x)
@@ -56,7 +57,7 @@ class AugmentLayer(nn.Module):
         self.updates += 1
 
         if self.updates % ADA_INTERVAL == 0:
-            self.r_t = self.d_outs / num_outs
+            self.r_t = self.d_outs / self.num_outs
 
             if self.r_t > AUG_P_TARGET:
                 sign = 1

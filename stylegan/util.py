@@ -13,12 +13,18 @@ def freezeModel(model):
         p.requires_grad = False
 
 def unfreezeModel(model):
-    for p in model.paramters():
+    for p in model.parameters():
         p.requires_grad = True
 
 # Flatten a tensor, accounting for batch axis
 def flatten(t):
     return t.reshape(t.shape[0], -1)
+
+# Normalize FIR kernel
+def norm_fir_k(k):
+    k = k[None, :] * k[:, None]
+    k = k / k.sum()
+    return k
 
 # ==== IMAGE PROCESSING ====
 
@@ -26,8 +32,6 @@ def flatten(t):
 def imageToTensor(img):
     t = torch.from_numpy(img).float()
     t = t.permute(0, 3, 1, 2) / 255
-    if USE_CUDA: t = t.cuda()
-    if USE_HALF: t = t.half()
     t = F.interpolate(t, (IMG_SIZE, IMG_SIZE))
     return t
 
@@ -35,7 +39,8 @@ from torchvision import transforms
 # Same as above but for torchvision transform
 imageToTensorTransform = transforms.Compose([
     transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace = True])
+    transforms.Resize(IMG_SIZE),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace = True)])
 
 # Convert a single CV image into a tensor
 def imageToTensorCV(img):
@@ -60,5 +65,15 @@ def tensorToCV(t):
 # 1 otherwise (latent vectors)
 def getMixingLatent(size):
     if np.random.random() < MIX_PROB:
-        return torch.randn(size, LATENT_DIM, 2)
-    return torch.randn(size, LATENT_DIM, 1)
+        return torch.randn(2, size, LATENT_DIM)
+    return torch.randn(size, LATENT_DIM)
+
+import torchvision
+# N x C x H x W input on [-1, 1]
+def drawSamples(samples, path):
+    im = torchvision.utils.make_grid(samples, nrow = 8, normalize = True, range = (-1, 1))
+    torchvision.utils.save_image(im, path)
+
+# === GENERATING ===
+
+

@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch import autograd
 import torch.nn.functional as F
 
 from constants import *
@@ -8,12 +9,12 @@ import util
 # Perpetual path length
 # Takes input output pair from generator
 # And a moving average of path length
-def PPL(w, gen_img, avg_path_len):
+def PPL(latents, gen_img, avg_path_len):
     n, c, h, w = gen_img.shape
     y = torch.randn_like(gen_img) / ((h * w)**.5)
 
     # Get jacobian * random image wrt input latent vector
-    grad, = autograd.grad((gen_img * y).sum(), w, create_graph = True)
+    grad, = autograd.grad((gen_img * y).sum(), latents, create_graph = True)
     # L2 norm of jacobian, when this is 0, jacobian orthogonal
     l2norm = torch.sqrt(grad.pow(2).sum(2).mean(1))
     # TODO: Do you really need sqrt for l2 norm as a loss term? check computation cost
