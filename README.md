@@ -1,5 +1,5 @@
 # destinygan
-Automatically generating Destiny 2 loot using StyleGAN2 and GPT-3
+Automatically generating Destiny 2 loot using StyleGAN2 with differntiable augmentation and GPT-3
 
 # Post-mortem  
 This is a project I haven't worked on in well over a year and could not complete. I've added to this repo everything I did accomplish for anyone that is interested in looking at the results I did end up getting or wants to make something else using the data scraper/model setup.  
