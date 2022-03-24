@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+
 from torch_utils.ops.upfirdn2d import upfirdn2d
 
 import layers
@@ -24,7 +25,7 @@ class WaveletTransform(nn.Module):
         HH = h.T * h
 
         filters = [LL, LH, HL, HH]
-        return torch.cat([f.unsqueeze(0) for f in filters]).cuda()
+        return torch.cat([f.unsqueeze(0) for f in filters]).to('cuda')
 
     # Normal haar transform
     def baseForward(self, x):
@@ -84,9 +85,9 @@ class GenBlock(nn.Module):
         self.conv2 = layers.modBlock(fo, fo, k, dim_style)
         self.to_rgb = tRGB(fo, dim_style)
 
-    def forward(self, x, style, y_last = None):
-        x = self.conv1(x, style[0])
-        x = self.conv2(x, style[1])
+    def forward(self, x, style, noise_inject, y_last = None):
+        x = self.conv1(x, style[0], noise_inject)
+        x = self.conv2(x, style[1], noise_inject)
         skip = self.to_rgb(x, style[2], y_last)
 
         return x, skip

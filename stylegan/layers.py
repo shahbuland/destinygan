@@ -2,11 +2,16 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
+import einops as eo
 
-from torch_utils.ops import upfirdn2d, conv2d_gradfix
+from torch_utils.ops import upfirdn2d, conv2d_gradfix, conv2d_resample
 
 from constants import *
 import util
+
+# Gets FIR kernel/filter
+def get_fir_k():
+    return upfirdn2d.setup_filter([1, 3, 3, 1]).cuda()
 
 # Simplified wrapper for upfirdn2d
 # for pooling and upsampling
@@ -96,8 +101,25 @@ class constantIn(nn.Module):
 
     def forward(self, x):
         n = x.shape[0]
-        y = self.inp_noise.repeat(n, 1, 1, 1)
+        if RANDOM_INP: y = torch.randn(n, 512, 4, 4, device = 'cuda')
+        else: y = self.inp_noise.repeat(n, 1, 1, 1)
+        
         return y
+
+class simplifyIn(nn.Module):
+    def __init__(self, fi, k):
+        super().__init__()
+
+        # need to map style vector (n, LATENT_DIM)
+        # to n, 512, 4, 4
+        self.map = nn.Linear(LATENT_DIM, fi * k * k)
+        self.fi = fi
+        self.k = k
+
+    def forward(self, x):
+        x = self.map(x)
+        x = x.view(-1, self.fi, self.k, self.k)
+        return x
 
 # Modulated convolution
 class modConv(nn.Module):
@@ -117,7 +139,12 @@ class modConv(nn.Module):
         # Maps from style latent space to fi
         self.mod_fc = modLinear(dim_style, fi)
        
-        self.fir = upFirDn2D(k, scale = 2 if mode == "UP" else 1)
+        self.fir = get_fir_k()
+        self.up = 2 if mode == "UP" else 1
+        self.down = 1
+        #self.fir = upFirDn2D(k, scale = 2 if mode == "UP" else 1)
+        #self.fir = UpsamplingBilinear2d(2) if mode == "UP" else DownsamplingBilinear2d(2)
+
     # takes input and style
     def forward(self, x, style):
         batch, channels, in_h, in_w = x.shape
@@ -137,28 +164,13 @@ class modConv(nn.Module):
             w = w * demod_mult
 
         w = w.view(batch * self.fo, self.fi, self.k, self.k)
-
         x = x.view(1, batch * self.fi, in_h, in_w)
-        if self.mode == "DOWN":
-            x = self.fir(x)
-            y = conv2d_gradfix.conv2d(x, w, padding = 0, stride = 2, groups = batch)
-        elif self.mode == "UP":
-            # For transposed convolution need filters out and in
-            # swapped
-            w = w.view(batch, self.fo, self.fi, self.k, self.k)
-            w = w.transpose(1, 2)
-            w = w.reshape(batch * self.fi, self.fo, self.k, self.k)
-            y = conv2d_gradfix.conv_transpose2d(x, w, padding = 0, stride = 2, groups = batch)
-        else:
-            y = conv2d_gradfix.conv2d(x, w, padding = self.pad, groups = batch)
 
-        _, _, out_h, out_w = y.shape
-        y = y.view(batch, self.fo, out_h, out_w)
-        
-        if self.mode == "UP":
-            y = self.fir(y)
-
-        return y
+        x = conv2d_resample.conv2d_resample(x = x, w = w, f = self.fir, up = self.up, down = self.down,
+                padding = self.pad, groups = batch, flip_weight = (self.up == 1))
+        _, _, out_h, out_w = x.shape
+        x = x.view(batch, self.fo, out_h, out_w)
+        return x
 
 # To RGB
 class tRGB(nn.Module):
@@ -183,20 +195,6 @@ class tRGB(nn.Module):
 
         return y
 
-# Layer that adds noise
-class Noise(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        # "Learned per channel scaling factor" for noise
-        self.w = nn.Parameter(torch.zeros(1))
-
-    def forward(self, x):
-        n, _, h, w = x.shape
-        noise = torch.randn(n, 1, h, w).cuda()
-
-        return x + w * noise
-
 # Single block in the generator
 # i.e. modulated conv, noise, style, all put together
 class modBlock(nn.Module):
@@ -206,12 +204,18 @@ class modBlock(nn.Module):
         
         self.conv = modConv(fi, fo, k, dim_style, mode, do_demod)
         self.bias = nn.Parameter(torch.zeros(1, fo, 1, 1))
-        self.noise = Noise()
+        self.noise_scale = nn.Linear(1, fo)
         self.act = nn.LeakyReLU(0.2)
 
-    def forward(self, x, style):
+    def forward(self, x, style, noise_inject):
         x = self.conv(x, style)
-        x = self.noise(x)
+
+        _, _, h, w = x.shape
+        noise_inject = noise_inject[:,:h,:w,:] # [N, h, w, 1]
+        noise_inject = self.noise_scale(noise_inject) # [N, h, w, fo]
+        noise_inject = noise_inject.permute(0, 3, 2, 1) # [N, fo, h, w]
+        x += noise_inject
+        
         x = x + self.bias
         x = self.act(x)
 
@@ -227,9 +231,9 @@ class GenBlock(nn.Module):
         self.to_rgb = tRGB(fo, dim_style)
 
     # Note, we expect 3 style vectors
-    def forward(self, x, style, y_last = None):
-        x = self.conv1(x, style[0])
-        x = self.conv2(x, style[1])
+    def forward(self, x, style, noise_inject, y_last = None):
+        x = self.conv1(x, style[0], noise_inject)
+        x = self.conv2(x, style[1], noise_inject)
         skip = self.to_rgb(x, style[2], y_last)
 
         return x, skip
@@ -239,23 +243,24 @@ class discConv(nn.Module):
     # Mode can be "DOWN" or None
     def __init__(self, fi, fo, k, mode = None, use_bias = True, use_act = True):
         super().__init__()
+        
+        self.use_bias = use_bias
+        self.use_act = use_act
 
         self.w = nn.Parameter(torch.randn(fo, fi, k, k))
         self.w_scale = (fi * k * k)**-.5
-        self.b = nn.Parameter(torch.zeros(fo)) if use_bias else None
+        self.b = nn.Parameter(torch.zeros(1, fo, 1, 1)) if use_bias else None
         self.act = nn.LeakyReLU(0.2) if use_act else None
-        self.use_act = use_act
+        self.p = k // 2
 
-        self.s = 2 if mode == "DOWN" else 1
-        self.p = 0 if mode == "DOWN" else k // 2
-
-        self.fir = None
-        if mode == "DOWN": self.fir = upFirDn2D(k, 0.5)
-
+        self.fir = get_fir_k()
+        self.up = 2 if mode == "UP" else 1
+        self.down = 2 if mode == "DOWN" else 1
     def forward(self, x):
-        if self.fir is not None:
-            x = self.fir(x)
-        x = conv2d_gradfix.conv2d(x, self.w * self.w_scale, bias = self.b, stride = self.s, padding = self.p)
+        flip_weight = (self.up == 1)
+        x = conv2d_resample.conv2d_resample(x = x, w = self.w * self.w_scale, f = self.fir,
+                up = self.up, down = self.down, padding = self.p, flip_weight = flip_weight) 
+        if self.use_bias: x = x + self.b
         if self.use_act: x = self.act(x) 
         return x
 
