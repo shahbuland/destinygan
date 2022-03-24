@@ -1,0 +1,1 @@
+One scraper gets a dataset of images in a folder specified. The other puts names, types and flavor text into a text file. Scroll down to DESIRED_TYPES constant if you only want to collect data for a certain class of weapon. 
