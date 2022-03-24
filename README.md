@@ -24,7 +24,11 @@ The samples that did come out of the model still looked cool! Here are some samp
 - For text generation you need a GPT-3 key
 - For scraping destiny data you need bungie API key  
 - Several of the model scripts require custom cuda kernels from the official stylegan repo from nvidia. Credit to them for that, I've putted it in a zip file for convenience: [link](https://drive.google.com/file/d/1QWH3_jJV65cN3ebc0yZvXJ3t_ROm3ZG3/view?usp=sharing). Just extract into model stylegan folder.  
-- The SWAGAN model probably isn't that well known but they reported much faster training so I implemented it here. Paper [here](https://arxiv.org/abs/2102.06108) if you want more info.  
+- The SWAGAN model probably isn't that well known but they reported much faster training so I implemented it here. Paper [here](https://arxiv.org/abs/2102.06108) if you want more info.    
+  
+# Training:
+- I trained the model around the start of 2021. This is when the dataset was scraped as well, so it wouldn't have seen any new items that came out after that time frame  
+- It was trained many, many times (as I said, mode collapse, so different looking images are from different model checkpoints) on an RTX 3090.
 
 # Select Samples:  
 Fun fact: the names it uses that were already names of guns from the game were not in the prompt! This means GPT-3 has already read articles on Destiny and has memory of names of certain weapons from it. Certainly, it never saw No Land Beyond in my dataset, as it consists entirely of D2 guns.  
